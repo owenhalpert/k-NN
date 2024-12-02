@@ -22,6 +22,7 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.knn.common.exception.OutOfNativeMemoryException;
 import org.opensearch.knn.common.featureflags.KNNFeatureFlags;
+import org.opensearch.knn.index.CacheMaintainer;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.plugin.stats.StatNames;
 
@@ -51,6 +52,7 @@ public class NativeMemoryCacheManager implements Closeable {
     private Cache<String, NativeMemoryAllocation> cache;
     private Deque<String> accessRecencyQueue;
     private final ExecutorService executor;
+    private final CacheMaintainer<String, NativeMemoryAllocation> cacheMaintainer;
     private AtomicBoolean cacheCapacityReached;
     private long maxWeight;
 
@@ -59,6 +61,8 @@ public class NativeMemoryCacheManager implements Closeable {
         this.cacheCapacityReached = new AtomicBoolean(false);
         this.maxWeight = Long.MAX_VALUE;
         initialize();
+        this.cacheMaintainer = new CacheMaintainer<>(cache);
+        this.cacheMaintainer.startMaintenance();
     }
 
     /**
@@ -142,6 +146,7 @@ public class NativeMemoryCacheManager implements Closeable {
     @Override
     public void close() {
         executor.shutdown();
+        cacheMaintainer.close();
     }
 
     /**

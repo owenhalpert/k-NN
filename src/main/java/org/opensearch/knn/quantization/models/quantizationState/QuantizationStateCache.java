@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.unit.ByteSizeValue;
+import org.opensearch.knn.index.CacheMaintainer;
 import org.opensearch.knn.index.KNNSettings;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ public class QuantizationStateCache {
 
     private static volatile QuantizationStateCache instance;
     private Cache<String, QuantizationState> cache;
+    private final CacheMaintainer<String, QuantizationState> cacheMaintainer;
     @Getter
     private long maxCacheSizeInKB;
     @Getter
@@ -40,6 +42,8 @@ public class QuantizationStateCache {
     QuantizationStateCache() {
         maxCacheSizeInKB = ((ByteSizeValue) KNNSettings.state().getSettingValue(QUANTIZATION_STATE_CACHE_SIZE_LIMIT)).getKb();
         buildCache();
+        this.cacheMaintainer = new CacheMaintainer<>(cache);
+        this.cacheMaintainer.startMaintenance();
     }
 
     /**
