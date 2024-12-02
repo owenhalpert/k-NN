@@ -17,6 +17,7 @@ import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.knn.index.CacheMaintainer;
 import org.opensearch.knn.index.KNNSettings;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +29,7 @@ import static org.opensearch.knn.index.KNNSettings.QUANTIZATION_STATE_CACHE_SIZE
  * A thread-safe singleton cache that contains quantization states.
  */
 @Log4j2
-public class QuantizationStateCache {
+public class QuantizationStateCache implements Closeable {
 
     private static volatile QuantizationStateCache instance;
     private Cache<String, QuantizationState> cache;
@@ -132,5 +133,10 @@ public class QuantizationStateCache {
      */
     public void clear() {
         cache.invalidateAll();
+    }
+
+    @Override
+    public void close() throws IOException {
+        cacheMaintainer.close();
     }
 }
