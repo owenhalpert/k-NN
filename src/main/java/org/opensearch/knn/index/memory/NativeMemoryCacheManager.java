@@ -52,7 +52,7 @@ public class NativeMemoryCacheManager implements Closeable {
     private Cache<String, NativeMemoryAllocation> cache;
     private Deque<String> accessRecencyQueue;
     private final ExecutorService executor;
-    private final CacheMaintainer<String, NativeMemoryAllocation> cacheMaintainer;
+    private CacheMaintainer<String, NativeMemoryAllocation> cacheMaintainer;
     private AtomicBoolean cacheCapacityReached;
     private long maxWeight;
 
@@ -61,8 +61,6 @@ public class NativeMemoryCacheManager implements Closeable {
         this.cacheCapacityReached = new AtomicBoolean(false);
         this.maxWeight = Long.MAX_VALUE;
         initialize();
-        this.cacheMaintainer = new CacheMaintainer<>(cache);
-        this.cacheMaintainer.startMaintenance();
     }
 
     /**
@@ -91,6 +89,10 @@ public class NativeMemoryCacheManager implements Closeable {
     }
 
     private void initialize(NativeMemoryCacheManagerDto nativeMemoryCacheDTO) {
+        if (cacheMaintainer != null) {
+            cacheMaintainer.close();
+        }
+
         CacheBuilder<String, NativeMemoryAllocation> cacheBuilder = CacheBuilder.newBuilder()
             .recordStats()
             .concurrencyLevel(1)
@@ -108,6 +110,9 @@ public class NativeMemoryCacheManager implements Closeable {
         cacheCapacityReached = new AtomicBoolean(false);
         accessRecencyQueue = new ConcurrentLinkedDeque<>();
         cache = cacheBuilder.build();
+
+        this.cacheMaintainer = new CacheMaintainer<>(cache);
+        this.cacheMaintainer.startMaintenance();
     }
 
     /**
@@ -146,7 +151,9 @@ public class NativeMemoryCacheManager implements Closeable {
     @Override
     public void close() {
         executor.shutdown();
-        cacheMaintainer.close();
+        if (cacheMaintainer != null) {
+            cacheMaintainer.close();
+        }
     }
 
     /**

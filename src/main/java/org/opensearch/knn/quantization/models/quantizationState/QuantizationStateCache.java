@@ -33,7 +33,7 @@ public class QuantizationStateCache implements Closeable {
 
     private static volatile QuantizationStateCache instance;
     private Cache<String, QuantizationState> cache;
-    private final CacheMaintainer<String, QuantizationState> cacheMaintainer;
+    private CacheMaintainer<String, QuantizationState> cacheMaintainer;
     @Getter
     private long maxCacheSizeInKB;
     @Getter
@@ -43,8 +43,6 @@ public class QuantizationStateCache implements Closeable {
     QuantizationStateCache() {
         maxCacheSizeInKB = ((ByteSizeValue) KNNSettings.state().getSettingValue(QUANTIZATION_STATE_CACHE_SIZE_LIMIT)).getKb();
         buildCache();
-        this.cacheMaintainer = new CacheMaintainer<>(cache);
-        this.cacheMaintainer.startMaintenance();
     }
 
     /**
@@ -63,6 +61,10 @@ public class QuantizationStateCache implements Closeable {
     }
 
     private void buildCache() {
+        if (cacheMaintainer != null) {
+            cacheMaintainer.close();
+        }
+
         this.cache = CacheBuilder.newBuilder().concurrencyLevel(1).maximumWeight(maxCacheSizeInKB).weigher((k, v) -> {
             try {
                 return ((QuantizationState) v).toByteArray().length;
@@ -76,6 +78,9 @@ public class QuantizationStateCache implements Closeable {
             )
             .removalListener(this::onRemoval)
             .build();
+
+        this.cacheMaintainer = new CacheMaintainer<>(cache);
+        this.cacheMaintainer.startMaintenance();
     }
 
     synchronized void rebuildCache() {
