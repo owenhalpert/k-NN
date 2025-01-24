@@ -329,7 +329,7 @@ public class NativeMemoryCacheManager implements Closeable {
                 return result;
             }
 
-            boolean lockAcquired = false;
+            AtomicBoolean lockAcquired = new AtomicBoolean(false);
             try {
                 synchronized (this) {
                     if (getCacheSizeInKilobytes() + nativeMemoryEntryContext.calculateSizeInKB() >= maxWeight) {
@@ -346,16 +346,20 @@ public class NativeMemoryCacheManager implements Closeable {
                             lruIterator.remove();
                         }
                     }
-                    result = cache.get(key, nativeMemoryEntryContext::load);
-                    if (acquirePreemptiveReadLock) {
-                        result.incRef();
-                        lockAcquired = true;
-                    }
+                    result = cache.get(key, () -> {
+                        NativeMemoryAllocation.IndexAllocation allocation =
+                            (NativeMemoryAllocation.IndexAllocation) nativeMemoryEntryContext.load();
+                        if (acquirePreemptiveReadLock) {
+                            allocation.incRef();
+                            lockAcquired.set(true);
+                        }
+                        return allocation;
+                    });
                     accessRecencyQueue.addLast(key);
                     return result;
                 }
             } catch (Exception e) {
-                if (result != null && lockAcquired) {
+                if (result != null && lockAcquired.get()) {
                     result.decRef();
                 }
                 throw e;
