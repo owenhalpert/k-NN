@@ -41,9 +41,9 @@ import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.toUnmodifiableMap;
 import static org.opensearch.common.settings.Setting.Property.Dynamic;
+import static org.opensearch.common.settings.Setting.Property.Final;
 import static org.opensearch.common.settings.Setting.Property.IndexScope;
 import static org.opensearch.common.settings.Setting.Property.NodeScope;
-import static org.opensearch.common.settings.Setting.Property.Final;
 import static org.opensearch.common.settings.Setting.Property.UnmodifiableOnRestore;
 import static org.opensearch.common.unit.MemorySizeValue.parseBytesSizeValueOrHeapRatio;
 import static org.opensearch.core.common.unit.ByteSizeValue.parseBytesSizeValue;
@@ -164,6 +164,19 @@ public class KNNSettings {
         IndexScope,
         Setting.Property.Deprecated
     );
+
+    // Setting to control parallel vs sequential upload into vector repo
+    public static final String PARALLEL_VECTOR_UPLOAD_SETTING_KEY = "knn.remote.parallel_vector_upload";
+    public static final Setting<Boolean> PARALLEL_VECTOR_UPLOAD_SETTING = Setting.boolSetting(
+        PARALLEL_VECTOR_UPLOAD_SETTING_KEY,
+        true,
+        Setting.Property.Dynamic,
+        Setting.Property.NodeScope
+    );
+
+    public static boolean getParallelVectorUpload() {
+        return KNNSettings.state().getSettingValue(PARALLEL_VECTOR_UPLOAD_SETTING_KEY);
+    }
 
     /**
      * build_vector_data_structure_threshold - This parameter determines when to build vector data structure for knn fields during indexing
@@ -516,6 +529,10 @@ public class KNNSettings {
             return KNN_VECTOR_STREAMING_MEMORY_LIMIT_PCT_SETTING;
         }
 
+        if (PARALLEL_VECTOR_UPLOAD_SETTING_KEY.equals(key)) {
+            return PARALLEL_VECTOR_UPLOAD_SETTING;
+        }
+
         if (QUANTIZATION_STATE_CACHE_SIZE_LIMIT.equals(key)) {
             return QUANTIZATION_STATE_CACHE_SIZE_LIMIT_SETTING;
         }
@@ -551,6 +568,7 @@ public class KNNSettings {
             ADVANCED_FILTERED_EXACT_SEARCH_THRESHOLD_SETTING,
             KNN_FAISS_AVX2_DISABLED_SETTING,
             KNN_VECTOR_STREAMING_MEMORY_LIMIT_PCT_SETTING,
+            PARALLEL_VECTOR_UPLOAD_SETTING,
             KNN_FAISS_AVX512_DISABLED_SETTING,
             KNN_FAISS_AVX512_SPR_DISABLED_SETTING,
             QUANTIZATION_STATE_CACHE_SIZE_LIMIT_SETTING,
