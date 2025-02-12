@@ -24,6 +24,7 @@ import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.index.IndexModule;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManager;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManagerDto;
+import org.opensearch.knn.index.remote.RemoteIndexClient;
 import org.opensearch.knn.index.util.IndexHyperParametersUtil;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationStateCacheManager;
 import org.opensearch.monitor.jvm.JvmInfo;
@@ -31,6 +32,7 @@ import org.opensearch.monitor.os.OsProbe;
 
 import java.security.InvalidParameterException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +66,7 @@ public class KNNSettings {
 
     private static final int INDEX_THREAD_QTY_MAX = 32;
     private static final QuantizationStateCacheManager quantizationStateCacheManager = QuantizationStateCacheManager.getInstance();
+    private static final RemoteIndexClient remoteIndexClient = RemoteIndexClient.getInstance();
 
     /**
      * Settings name
@@ -94,6 +97,9 @@ public class KNNSettings {
     public static final String KNN_FAISS_AVX512_SPR_DISABLED = "knn.faiss.avx512_spr.disabled";
     public static final String KNN_DISK_VECTOR_SHARD_LEVEL_RESCORING_DISABLED = "index.knn.disk.vector.shard_level_rescoring_disabled";
     public static final String KNN_DERIVED_SOURCE_ENABLED = "index.knn.derived_source.enabled";
+    public static final String KNN_REMOTE_BUILD_SERVICE_ENDPOINT = "knn.remote_build_service.endpoint";
+    public static final String KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL = "knn.remote_build_service.poll_interval";
+    public static final String KNN_REMOTE_BUILD_SERVICE_TIMEOUT = "knn.remote_build_service.timeout";
 
     /**
      * Default setting values
@@ -390,6 +396,14 @@ public class KNNSettings {
         NodeScope
     );
 
+    public static final Setting<List<String>> KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING = Setting.listSetting(
+        KNN_REMOTE_BUILD_SERVICE_ENDPOINT,
+        Collections.emptyList(),
+        Function.identity(), // todo
+        NodeScope,
+        Dynamic
+    );
+
     /**
      * Dynamic settings
      */
@@ -474,6 +488,9 @@ public class KNNSettings {
         clusterService.getClusterSettings().addSettingsUpdateConsumer(QUANTIZATION_STATE_CACHE_EXPIRY_TIME_MINUTES_SETTING, it -> {
             quantizationStateCacheManager.rebuildCache();
         });
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING, it -> {
+            remoteIndexClient.rebuildClient();
+        });
     }
 
     /**
@@ -546,6 +563,10 @@ public class KNNSettings {
         }
         if (KNN_DERIVED_SOURCE_ENABLED.equals(key)) {
             return KNN_DERIVED_SOURCE_ENABLED_SETTING;
+        }
+
+        if (KNN_REMOTE_BUILD_SERVICE_ENDPOINT.equals(key)) {
+            return KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING;
         }
 
         throw new IllegalArgumentException("Cannot find setting by key [" + key + "]");

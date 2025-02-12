@@ -204,6 +204,7 @@ public class KNNPlugin extends Plugin
         NativeMemoryLoadStrategy.TrainingLoadStrategy.initialize(vectorReader);
 
         KNNSettings.state().initialize(client, clusterService);
+
         KNNClusterUtil.instance().initialize(clusterService);
         ModelDao.OpenSearchKNNModelDao.initialize(client, clusterService, environment.settings());
         ModelCache.initialize(ModelDao.OpenSearchKNNModelDao.getInstance(), clusterService);
