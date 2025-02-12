@@ -5,28 +5,34 @@
 
 package org.opensearch.knn.index.remote;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.log4j.Log4j2;
+import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.knn.index.KNNSettings;
-import software.amazon.awssdk.http.ExecutableHttpRequest;
+import software.amazon.awssdk.http.HttpExecuteRequest;
 import software.amazon.awssdk.http.HttpExecuteResponse;
 import software.amazon.awssdk.http.SdkHttpClient;
-import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.http.SdkHttpMethod;
+import software.amazon.awssdk.http.SdkHttpRequest;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
 
 @Log4j2
 public class RemoteIndexClient {
-    private static RemoteIndexClient INSTANCE;
 
+    private static RemoteIndexClient INSTANCE;
     private volatile SdkHttpClient httpClient;
 
-    private RemoteIndexClient() {
-        initialize();
-    }
-
-    private void initialize() {
+    RemoteIndexClient() {
         this.httpClient = createHttpClient();
     }
 
@@ -38,16 +44,18 @@ public class RemoteIndexClient {
     }
 
     private SdkHttpClient createHttpClient() {
-        return ApacheHttpClient.create();
-
-        // TODO add credentials from OpenSearch keystore
+        // HttpHost host = new HttpHost(String.valueOf(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT)));
+        HttpHost host = new HttpHost("localhost", 8888, "http");
+        AuthScope authScope = new AuthScope(host);
+        BasicCredentialsProvider basicCredentialsProvider = new BasicCredentialsProvider();
+        basicCredentialsProvider.setCredentials(authScope, new UsernamePasswordCredentials("demo", "demo"));
+        return ApacheHttpClient.builder().credentialsProvider(basicCredentialsProvider).build();
 
     }
 
-    public String submitVectorBuild() throws IOException {
-        SdkHttpFullRequest buildRequest = constructBuildRequest();
-        ExecutableHttpRequest executableHttpRequest = httpClient.prepareRequest(null);
-        HttpExecuteResponse response = executableHttpRequest.call();
+    public String submitVectorBuild() throws IOException, URISyntaxException {
+        HttpExecuteRequest buildRequest = constructBuildRequest();
+        HttpExecuteResponse response = httpClient.prepareRequest(buildRequest).call();
         String jobID = null;
         if (response.httpResponse().isSuccessful()) {
             jobID = response.responseBody().toString();
@@ -56,13 +64,18 @@ public class RemoteIndexClient {
     }
 
     @SuppressWarnings("BusyWait")
-    public String awaitVectorBuild(String jobId) throws InterruptedException {
+    public String awaitVectorBuild(String jobId) throws InterruptedException, IOException, URISyntaxException {
         long startTime = System.currentTimeMillis();
         long timeout = ((TimeValue) (KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_TIMEOUT))).getMinutes();
         long pollInterval = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL);
 
+        Thread.sleep(1000 * 60); // TODO Set initial delay
+
         while (System.currentTimeMillis() - startTime < timeout) {
-            String status = getBuildStatus(jobId);
+            HttpExecuteResponse statusResponse = getBuildStatus(jobId);
+            String status = statusResponse.responseBody().get().toString();
+
+            // TODO Return full response for error message in FAILED and build path in COMPLETED
 
             switch (status) {
                 case "COMPLETED_INDEX_BUILD":
@@ -82,15 +95,21 @@ public class RemoteIndexClient {
         return null; // TODO: Fallback to local CPU
     }
 
-    public SdkHttpFullRequest constructBuildRequest() {
-        String endpoint = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build";
-        SdkHttpFullRequest.builder().encodedPath(endpoint);
-        return null;
+    // TODO maybe more maintainable if this takes in a BuildRequest object that we can tweak in the future.
+    public HttpExecuteRequest constructBuildRequest() throws MalformedURLException, URISyntaxException {
+        // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build").toURI();
+        URI endpoint = new URL("http://localhost:8888" + "/_build").toURI();
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        SdkHttpRequest request = SdkHttpRequest.builder().method(SdkHttpMethod.POST).uri(endpoint).build();
+        return HttpExecuteRequest.builder().request(request).build();
     }
 
-    public String getBuildStatus(String jobId) {
-        String endpoint = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_status/" + jobId;
-        return null;
+    public HttpExecuteResponse getBuildStatus(String jobId) throws IOException, URISyntaxException {
+        // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_status").toURI();
+        URI endpoint = new URL("http://localhost:8888" + "/_status").toURI();
+        SdkHttpRequest request = SdkHttpRequest.builder().method(SdkHttpMethod.POST).uri(endpoint).build();
+        return httpClient.prepareRequest(HttpExecuteRequest.builder().request(request).build()).call();
     }
 
     public void cancelBuild(String jobId) {
@@ -101,6 +120,12 @@ public class RemoteIndexClient {
         if (httpClient != null) {
             httpClient.close();
         }
-        initialize();
+        httpClient = createHttpClient();
+    }
+
+    public void close() {
+        if (httpClient != null) {
+            httpClient.close();
+        }
     }
 }

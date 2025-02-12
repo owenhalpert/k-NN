@@ -131,6 +131,9 @@ public class KNNSettings {
     public static final Integer KNN_DEFAULT_QUANTIZATION_STATE_CACHE_EXPIRY_TIME_MINUTES = 60;
     public static final boolean KNN_DISK_VECTOR_SHARD_LEVEL_RESCORING_DISABLED_VALUE = false;
 
+    public static final Integer KNN_DEFAULT_REMOTE_BUILD_SERVICE_TIMEOUT_MINUTES = 60;
+    public static final Integer KNN_DEFAULT_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SECONDS = 30;
+
     /**
      * Settings Definition
      */
@@ -399,7 +402,21 @@ public class KNNSettings {
     public static final Setting<List<String>> KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING = Setting.listSetting(
         KNN_REMOTE_BUILD_SERVICE_ENDPOINT,
         Collections.emptyList(),
-        Function.identity(), // todo
+        Function.identity(),
+        NodeScope,
+        Dynamic
+    );
+
+    public static final Setting<TimeValue> KNN_REMOTE_BUILD_SERVICE_TIMEOUT_SETTING = Setting.timeSetting(
+        KNN_REMOTE_BUILD_SERVICE_TIMEOUT,
+        TimeValue.timeValueMinutes(KNN_DEFAULT_REMOTE_BUILD_SERVICE_TIMEOUT_MINUTES),
+        NodeScope,
+        Dynamic
+    );
+
+    public static final Setting<TimeValue> KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING = Setting.timeSetting(
+        KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL,
+        TimeValue.timeValueSeconds(KNN_DEFAULT_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SECONDS),
         NodeScope,
         Dynamic
     );
@@ -569,6 +586,14 @@ public class KNNSettings {
             return KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING;
         }
 
+        if (KNN_REMOTE_BUILD_SERVICE_TIMEOUT.equals(key)) {
+            return KNN_REMOTE_BUILD_SERVICE_TIMEOUT_SETTING;
+        }
+
+        if (KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL.equals(key)) {
+            return KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING;
+        }
+
         throw new IllegalArgumentException("Cannot find setting by key [" + key + "]");
     }
 
@@ -595,7 +620,10 @@ public class KNNSettings {
             QUANTIZATION_STATE_CACHE_SIZE_LIMIT_SETTING,
             QUANTIZATION_STATE_CACHE_EXPIRY_TIME_MINUTES_SETTING,
             KNN_DISK_VECTOR_SHARD_LEVEL_RESCORING_DISABLED_SETTING,
-            KNN_DERIVED_SOURCE_ENABLED_SETTING
+            KNN_DERIVED_SOURCE_ENABLED_SETTING,
+            KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING,
+            KNN_REMOTE_BUILD_SERVICE_TIMEOUT_SETTING,
+            KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING
         );
         return Stream.concat(settings.stream(), Stream.concat(getFeatureFlags().stream(), dynamicCacheSettings.values().stream()))
             .collect(Collectors.toList());
