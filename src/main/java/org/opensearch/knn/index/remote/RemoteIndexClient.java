@@ -40,7 +40,7 @@ public class RemoteIndexClient {
     private SdkHttpClient createHttpClient() {
         return ApacheHttpClient.create();
 
-        // TODO add credentials from OpenSearch Keystore
+        // TODO add credentials from OpenSearch keystore
 
     }
 
