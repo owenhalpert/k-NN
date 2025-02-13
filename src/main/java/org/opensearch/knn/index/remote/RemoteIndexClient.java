@@ -34,6 +34,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Class to handle all interactions with the remote vector build service.
+ * InterruptedExceptions will cause a fallback to local CPU build.
+ */
 @Log4j2
 public class RemoteIndexClient {
 
@@ -73,8 +77,6 @@ public class RemoteIndexClient {
     /**
      * Submit a build to the Remote Vector Build Service endpoint
      * @return job_id from the server response used to track the job
-     * @throws IOException
-     * @throws URISyntaxException
      */
     public String submitVectorBuild() throws IOException, URISyntaxException {
         HttpExecuteRequest buildRequest = constructBuildRequest();
@@ -92,8 +94,6 @@ public class RemoteIndexClient {
      * @param jobId identifier from the server to track the job
      * @return the path to the completed index
      * @throws InterruptedException on a timeout or terminal failure from the server to trigger local CPU fallback
-     * @throws IOException
-     * @throws URISyntaxException
      */
     @SuppressWarnings("BusyWait")
     public String awaitVectorBuild(String jobId) throws InterruptedException, IOException, URISyntaxException {
@@ -134,10 +134,8 @@ public class RemoteIndexClient {
 
     /**
      * Helper method to directly get the status response for a given job ID
-     * @param jobId
-     * @return
-     * @throws IOException
-     * @throws URISyntaxException
+     * @param jobId to check
+     * @return HttpExecuteResponse for the status request
      */
     public HttpExecuteResponse getBuildStatus(String jobId) throws IOException, URISyntaxException {
         // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_status").toURI();
@@ -148,7 +146,7 @@ public class RemoteIndexClient {
 
     /**
      * Cancel a build by job ID
-     * @param jobId
+     * @param jobId to cancel
      */
     public void cancelBuild(String jobId) {
         String endpoint = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_cancel/" + jobId;
@@ -162,10 +160,7 @@ public class RemoteIndexClient {
 
     /**
      * Construct the JSON request body and HTTP request for the index build request
-     * @return
-     * @throws MalformedURLException
-     * @throws URISyntaxException
-     * @throws JsonProcessingException
+     * @return HttpExecuteRequest for the index build request with parameters set
      */
     public HttpExecuteRequest constructBuildRequest() throws MalformedURLException, URISyntaxException, JsonProcessingException {
         // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build").toURI();
@@ -199,20 +194,18 @@ public class RemoteIndexClient {
 
     /**
      * Get an HTTP response body as a string. Future invocations of readAllBytes will return an empty byte array.
-     * @param response
+     * @param response HTTP response to read from
      * @return String of the response body
-     * @throws JsonProcessingException
      */
     public String getResponseString(HttpExecuteResponse response) {
         if (response.httpResponse().isSuccessful()) {
-            String responseBody = response.responseBody().map(body -> {
+            return response.responseBody().map(body -> {
                 try {
                     return new String(body.readAllBytes(), StandardCharsets.UTF_8);
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to read response body", e);
                 }
-            }).orElse("Empty response");
-            return responseBody;
+            }).orElseThrow(() -> new RuntimeException("Response body is empty"));
         }
         return null;
     }
@@ -222,7 +215,6 @@ public class RemoteIndexClient {
      * @param responseBody The response to read
      * @param key The key to lookup
      * @return The value for the key, or null if not found
-     * @throws JsonProcessingException
      */
     public String getValueFromResponse(String responseBody, String key) throws JsonProcessingException {
         ObjectMapper mapper = new ObjectMapper();
