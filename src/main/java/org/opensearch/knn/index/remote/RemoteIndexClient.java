@@ -7,6 +7,7 @@ package org.opensearch.knn.index.remote;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.log4j.Log4j2;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -56,7 +57,6 @@ public class RemoteIndexClient {
         BasicCredentialsProvider basicCredentialsProvider = new BasicCredentialsProvider();
         basicCredentialsProvider.setCredentials(authScope, new UsernamePasswordCredentials("demo", "demo"));
         return ApacheHttpClient.builder().credentialsProvider(basicCredentialsProvider).build();
-
     }
 
     public String submitVectorBuild() throws IOException, URISyntaxException {
@@ -80,7 +80,11 @@ public class RemoteIndexClient {
 
         String jobID = null;
         if (response.httpResponse().isSuccessful()) {
-            jobID = response.responseBody().toString();
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode jsonResponse = (ObjectNode) mapper.readTree(responseBody);
+            if (jsonResponse.has("job_id")) {
+                jobID = jsonResponse.get("job_id").asText();
+            }
         }
         return jobID;
     }
