@@ -98,12 +98,12 @@ public class RemoteIndexBuilder {
             log.info("Repository write took {} ms for vector field [{}]", time_in_millis, fieldInfo.getName());
 
             stopWatch = new StopWatch().start();
-            submitVectorBuild();
+            String jobID = RemoteIndexClient.getInstance().submitVectorBuild();
             time_in_millis = stopWatch.stop().totalTime().millis();
             log.info("Submit vector build took {} ms for vector field [{}]", time_in_millis, fieldInfo.getName());
 
             stopWatch = new StopWatch().start();
-            awaitVectorBuild();
+            String buildPath = RemoteIndexClient.getInstance().awaitVectorBuild(jobID);
             time_in_millis = stopWatch.stop().totalTime().millis();
             log.info("Await vector build took {} ms for vector field [{}]", time_in_millis, fieldInfo.getName());
 
