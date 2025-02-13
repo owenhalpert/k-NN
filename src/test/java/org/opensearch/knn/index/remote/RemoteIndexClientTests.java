@@ -35,7 +35,5 @@ public class RemoteIndexClientTests extends KNNTestCase {
     public void testBuildRequest() throws IOException, URISyntaxException {
         RemoteIndexClient remoteIndexClient = RemoteIndexClient.getInstance();
         remoteIndexClient.submitVectorBuild();
-        remoteIndexClient.close();
     }
-
 }

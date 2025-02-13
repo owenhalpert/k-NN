@@ -5,6 +5,7 @@
 
 package org.opensearch.knn.index.remote;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.log4j.Log4j2;
 import org.apache.http.HttpHost;
@@ -16,15 +17,20 @@ import org.opensearch.knn.index.KNNSettings;
 import software.amazon.awssdk.http.HttpExecuteRequest;
 import software.amazon.awssdk.http.HttpExecuteResponse;
 import software.amazon.awssdk.http.SdkHttpClient;
+import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.http.SdkHttpRequest;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.utils.StringInputStream;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 @Log4j2
 public class RemoteIndexClient {
@@ -56,6 +62,22 @@ public class RemoteIndexClient {
     public String submitVectorBuild() throws IOException, URISyntaxException {
         HttpExecuteRequest buildRequest = constructBuildRequest();
         HttpExecuteResponse response = httpClient.prepareRequest(buildRequest).call();
+        String responseBody = response.responseBody().map(body -> {
+            try {
+                return new String(body.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read response body", e);
+            }
+        }).orElse("Empty response");
+
+        // Print response details
+        System.out.println("Response Status: " + response.httpResponse().statusCode());
+        System.out.println("Response Body: " + responseBody);
+
+        if (response.httpResponse().statusCode() != 200) {
+            throw new RuntimeException("Failed to submit vector build: " + responseBody);
+        }
+
         String jobID = null;
         if (response.httpResponse().isSuccessful()) {
             jobID = response.responseBody().toString();
@@ -96,13 +118,34 @@ public class RemoteIndexClient {
     }
 
     // TODO maybe more maintainable if this takes in a BuildRequest object that we can tweak in the future.
-    public HttpExecuteRequest constructBuildRequest() throws MalformedURLException, URISyntaxException {
+    public HttpExecuteRequest constructBuildRequest() throws MalformedURLException, URISyntaxException, JsonProcessingException {
         // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build").toURI();
         URI endpoint = new URL("http://localhost:8888" + "/_build").toURI();
-        ObjectMapper objectMapper = new ObjectMapper();
 
-        SdkHttpRequest request = SdkHttpRequest.builder().method(SdkHttpMethod.POST).uri(endpoint).build();
-        return HttpExecuteRequest.builder().request(request).build();
+        Map<String, Object> methodParams = new HashMap<>();
+        methodParams.put("ef_construction", 128);
+        methodParams.put("m", 16);
+
+        RemoteBuildRequest remoteBuildRequest = new RemoteBuildRequest.Builder().repositoryType("S3")
+            .repositoryName("MyVectorStore")
+            .objectPath("MyObjectPath")
+            .tenantId("MyTenant")
+            .numDocs("100000")
+            .vectorDataType("float")
+            .addIndexParameter("dimension", 128)
+            .addIndexParameter("space_type", "l2")
+            .setMethod("hnsw", methodParams)
+            .build();
+
+        String requestBody = new ObjectMapper().writeValueAsString(remoteBuildRequest.toJson());
+
+        SdkHttpFullRequest request = SdkHttpFullRequest.builder()
+            .method(SdkHttpMethod.POST)
+            .uri(endpoint)
+            .appendHeader("Content-Type", "application/json")
+            .build();
+
+        return HttpExecuteRequest.builder().contentStreamProvider(() -> new StringInputStream(requestBody)).request(request).build();
     }
 
     public HttpExecuteResponse getBuildStatus(String jobId) throws IOException, URISyntaxException {
