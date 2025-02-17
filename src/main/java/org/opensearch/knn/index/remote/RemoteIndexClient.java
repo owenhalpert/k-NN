@@ -71,7 +71,7 @@ public class RemoteIndexClient {
         // TODO fetch creds from Keystore
         basicCredentialsProvider.setCredentials(authScope, new UsernamePasswordCredentials("demo", "demo"));
 
-        return ApacheHttpClient.builder().credentialsProvider(basicCredentialsProvider).build();
+        return ApacheHttpClient.builder().build();
     }
 
     /**
@@ -170,13 +170,14 @@ public class RemoteIndexClient {
         methodParams.put("ef_construction", 128);
         methodParams.put("m", 16);
 
-        RemoteBuildRequest remoteBuildRequest = new RemoteBuildRequest.Builder().repositoryType("S3")
+        RemoteBuildRequest remoteBuildRequest = RemoteBuildRequest.builder()
+            .repositoryType("S3")
             .repositoryName("MyVectorStore")
             .objectPath("MyObjectPath")
             .tenantId("MyTenant")
-            .numDocs("100000")
-            .vectorDataType("float")
-            .addIndexParameter("dimension", 128)
+            .docCount(100000)
+            .dataType("float")
+            .dimension(128)
             .addIndexParameter("space_type", "l2")
             .setMethod("hnsw", methodParams)
             .build();

@@ -15,10 +15,12 @@ import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.Booleans;
+import org.opensearch.common.settings.SecureSetting;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.core.common.settings.SecureString;
 import org.opensearch.core.common.unit.ByteSizeUnit;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.index.IndexModule;
@@ -100,6 +102,7 @@ public class KNNSettings {
     public static final String KNN_REMOTE_BUILD_SERVICE_ENDPOINT = "knn.remote_build_service.endpoint";
     public static final String KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL = "knn.remote_build_service.poll_interval";
     public static final String KNN_REMOTE_BUILD_SERVICE_TIMEOUT = "knn.remote_build_service.timeout";
+    public static final String KNN_REMOTE_BUILD_SERVICE_PASSWORD = "knn.remote_build_service.password";
 
     /**
      * Default setting values
@@ -421,6 +424,11 @@ public class KNNSettings {
         Dynamic
     );
 
+    public static final Setting<SecureString> KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING = SecureSetting.secureString(
+        KNN_REMOTE_BUILD_SERVICE_PASSWORD,
+        null
+    );
+
     /**
      * Dynamic settings
      */
@@ -623,7 +631,8 @@ public class KNNSettings {
             KNN_DERIVED_SOURCE_ENABLED_SETTING,
             KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING,
             KNN_REMOTE_BUILD_SERVICE_TIMEOUT_SETTING,
-            KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING
+            KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING,
+            KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING
         );
         return Stream.concat(settings.stream(), Stream.concat(getFeatureFlags().stream(), dynamicCacheSettings.values().stream()))
             .collect(Collectors.toList());
