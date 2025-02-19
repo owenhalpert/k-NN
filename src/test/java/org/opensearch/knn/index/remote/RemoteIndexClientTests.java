@@ -65,22 +65,25 @@ public class RemoteIndexClientTests extends OpenSearchSingleNodeTestCase {
 
     @Test
     public void testConstructBuildRequest() throws IOException {
-        Map<String, Object> algorithmParameters = new HashMap<>();
-        algorithmParameters.put("ef_construction", 128);
-        algorithmParameters.put("m", 16);
+        Map<String, Object> algorithmParams = new HashMap<>();
+        algorithmParams.put("ef_construction", 100);
+        algorithmParams.put("m", 16);
+
+        Map<String, Object> indexParameters = new HashMap<>();
+        indexParameters.put("algorithm", "hnsw");
+        indexParameters.put("space_type", "l2");
+        indexParameters.put("algorithm_parameters", algorithmParams);
 
         RemoteBuildRequest request = RemoteBuildRequest.builder()
             .repositoryType("S3")
             .containerName("MyVectorStore")
             .objectPath("MyObjectPath")
             .tenantId("MyTenant")
-            .docCount(100000)
-            .dataType("float")
-            .dimension(100)
+            .dimension(256)
+            .docCount(1_000_000)
+            .dataType("fp32")
             .engine("faiss")
-            .addIndexParameter("space_type", "l2")
-            .setAlgorithm("hnsw")
-            .setAlgorithmParameters(algorithmParameters)
+            .indexParameters(indexParameters)
             .build();
 
         String expectedJson = "{"
@@ -88,15 +91,15 @@ public class RemoteIndexClientTests extends OpenSearchSingleNodeTestCase {
             + "\"container_name\":\"MyVectorStore\","
             + "\"object_path\":\"MyObjectPath\","
             + "\"tenant_id\":\"MyTenant\","
-            + "\"dimension\":100,"
-            + "\"doc_count\":100000,"
-            + "\"data_type\":\"float\","
+            + "\"dimension\":256,"
+            + "\"doc_count\":1000000,"
+            + "\"data_type\":\"fp32\","
             + "\"engine\":\"faiss\","
             + "\"index_parameters\":{"
             + "\"space_type\":\"l2\","
             + "\"algorithm\":\"hnsw\","
             + "\"algorithm_parameters\":{"
-            + "\"ef_construction\":128,"
+            + "\"ef_construction\":100,"
             + "\"m\":16"
             + "}"
             + "}"

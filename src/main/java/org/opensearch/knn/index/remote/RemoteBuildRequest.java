@@ -25,32 +25,11 @@ public class RemoteBuildRequest {
     private final int docCount;
     private final String dataType;
     private final String engine;
+    private final String algorithm;
     @Builder.Default
-    private static final Map<String, Object> indexParameters = new HashMap<>();
+    private final Map<String, Object> indexParameters = new HashMap<>();
 
-    public static class RemoteBuildRequestBuilder {
-        public RemoteBuildRequestBuilder addIndexParameter(String key, String value) {
-            indexParameters.put(key, value);
-            return this;
-        }
-
-        public RemoteBuildRequestBuilder setSpaceType(String spaceType) {
-            indexParameters.put("space_type", spaceType);
-            return this;
-        }
-
-        public RemoteBuildRequestBuilder setAlgorithm(String algorithm) {
-            indexParameters.put("algorithm", algorithm);
-            return this;
-        }
-
-        public RemoteBuildRequestBuilder setAlgorithmParameters(Map<String, Object> parameters) {
-            indexParameters.put("algorithm_parameters", parameters);
-            return this;
-        }
-    }
-
-    // TODO: Add type checking to index parameters by creating a map and looking up data type in that map?
+    // TODO: Add type checking to all parameters, add individual setEfConstruction methods to check index params
 
     public String toJson() throws IOException {
         try (XContentBuilder builder = JsonXContent.contentBuilder()) {

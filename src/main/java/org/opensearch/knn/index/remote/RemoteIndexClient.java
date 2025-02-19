@@ -25,10 +25,11 @@ import org.opensearch.core.common.settings.SecureString;
 import org.opensearch.knn.index.KNNSettings;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Class to handle all interactions with the remote vector build service.
@@ -47,8 +48,6 @@ public class RemoteIndexClient {
 
     RemoteIndexClient() {
         this.httpClient = createHttpClient();
-        SecureString username = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_USERNAME);
-        SecureString password = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_PASSWORD);
     }
 
     /**
@@ -67,15 +66,20 @@ public class RemoteIndexClient {
      * @return The HTTP Client
      */
     private CloseableHttpClient createHttpClient() {
-        // HttpHost host = new HttpHost(String.valueOf(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT)));
+        HttpHost host = new HttpHost(String.valueOf(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT)));
 
-        HttpHost host = new HttpHost("http://localhost:8888");
+        SecureString username = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_USERNAME);
+        SecureString password = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_PASSWORD);
 
-        // TODO fetch creds from Keystore
-
-        this.clientContext = ContextBuilder.create()
-            .preemptiveBasicAuth(host, new UsernamePasswordCredentials("demo", "demo".toCharArray()))
-            .build();
+        if (password == null) {
+            this.clientContext = null;
+        } else {
+            try (SecureString copy = password.clone()) {
+                this.clientContext = ContextBuilder.create()
+                    .preemptiveBasicAuth(host, new UsernamePasswordCredentials(username.toString(), copy.getChars()))
+                    .build();
+            }
+        }
 
         return HttpClients.custom()
             .setRetryStrategy(new RemoteIndexClientRetryStrategy())
@@ -87,7 +91,7 @@ public class RemoteIndexClient {
     * Submit a build to the Remote Vector Build Service endpoint
     * @return job_id from the server response used to track the job
     */
-    public String submitVectorBuild() throws IOException {
+    public String submitVectorBuild() throws IOException, URISyntaxException {
         HttpPost buildRequest = constructBuildRequest();
         String response = httpClient.execute(buildRequest, clientContext, new BasicHttpClientResponseHandler());
         return getValueFromResponse(response, "job_id");
@@ -102,18 +106,17 @@ public class RemoteIndexClient {
     @SuppressWarnings("BusyWait")
     public String awaitVectorBuild(String jobId) throws InterruptedException, IOException, URISyntaxException {
         long startTime = System.currentTimeMillis();
-        // long timeout = ((TimeValue) (KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_TIMEOUT))).getMillis();
-        long timeout = new TimeValue(10, TimeUnit.MINUTES).getMillis();
-        // long pollInterval = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL);
-        long pollInterval = new TimeValue(30, TimeUnit.SECONDS).getMillis();
+        long timeout = ((TimeValue) (KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_TIMEOUT))).getMillis();
+        long pollInterval = KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL);
 
-        // Thread.sleep(1000 * 60); // TODO Set initial delay
+        Thread.sleep(1000 * 60);
 
         while (System.currentTimeMillis() - startTime < timeout) {
             String response = getBuildStatus(jobId);
             String status = getValueFromResponse(response, "task_status");
-
-            // TODO Return full response for error message in FAILED and build path in COMPLETED
+            if (status == null) {
+                throw new InterruptedException("Build status response did not contain a status.");
+            }
 
             switch (status) {
                 case "COMPLETED_INDEX_BUILD":
@@ -131,11 +134,6 @@ public class RemoteIndexClient {
                     Thread.sleep(pollInterval);
             }
         }
-        // try {
-        // cancelBuild(jobId);
-        // } catch (Exception e) {
-        // log.error("Failed to cancel build after timeout", e);
-        // }
         throw new InterruptedException("Build timed out, falling back to CPU build.");
     }
 
@@ -144,9 +142,9 @@ public class RemoteIndexClient {
      * @param jobId to check
      * @return HttpExecuteResponse for the status request
      */
-    public String getBuildStatus(String jobId) throws IOException {
-        // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_status").toURI();
-        HttpGet request = new HttpGet("http://localhost:8888/_status/" + jobId);
+    public String getBuildStatus(String jobId) throws IOException, URISyntaxException {
+        URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_status/").toURI();
+        HttpGet request = new HttpGet(endpoint + jobId);
         return httpClient.execute(request, clientContext, new BasicHttpClientResponseHandler());
     }
 
@@ -154,15 +152,19 @@ public class RemoteIndexClient {
      * Construct the JSON request body and HTTP request for the index build request
      * @return HttpExecuteRequest for the index build request with parameters set
      */
-    public HttpPost constructBuildRequest() throws IOException {
-        // URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build").toURI();
+    public HttpPost constructBuildRequest() throws IOException, URISyntaxException {
+        URI endpoint = new URL(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT) + "/_build").toURI();
 
-        HttpPost request = new HttpPost("http://localhost:8888/_build");
+        HttpPost request = new HttpPost(endpoint);
         request.setHeader("Content-Type", "application/json");
 
-        Map<String, Object> methodParams = new HashMap<>();
-        methodParams.put("ef_construction", 128);
-        methodParams.put("m", 16);
+        Map<String, Object> algorithmParams = new HashMap<>();
+        algorithmParams.put("ef_construction", 100);
+        algorithmParams.put("m", 16);
+
+        Map<String, Object> indexParameters = new HashMap<>();
+        indexParameters.put("algorithm", "hnsw");
+        indexParameters.put("algorithm_parameters", algorithmParams);
 
         RemoteBuildRequest remoteBuildRequest = RemoteBuildRequest.builder()
             .repositoryType("S3")
@@ -173,9 +175,7 @@ public class RemoteIndexClient {
             .docCount(1_000_000)
             .dataType("fp32")
             .engine("faiss")
-            .setAlgorithm("hnsw")
-            .setAlgorithmParameters(methodParams)
-            .addIndexParameter("space_type", "l2")
+            .indexParameters(indexParameters)
             .build();
 
         request.setEntity(new StringEntity(remoteBuildRequest.toJson()));
