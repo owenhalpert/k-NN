@@ -8,7 +8,6 @@ package org.opensearch.knn.index.remote;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Before;
-import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.cluster.service.ClusterService;
@@ -56,14 +55,12 @@ public class RemoteIndexClientTests extends OpenSearchSingleNodeTestCase {
         when(clusterService.getClusterSettings()).thenReturn(new ClusterSettings(Settings.EMPTY, defaultClusterSettings));
     }
 
-    @Test
     public void testGetHttpClient_success() throws IOException {
         RemoteIndexClient client = RemoteIndexClient.getInstance();
         assertNotNull(client);
         client.close();
     }
 
-    @Test
     public void testConstructBuildRequest() throws IOException {
         Map<String, Object> algorithmParams = new HashMap<>();
         algorithmParams.put("ef_construction", 100);
@@ -107,7 +104,6 @@ public class RemoteIndexClientTests extends OpenSearchSingleNodeTestCase {
         assertEquals(mapper.readTree(expectedJson), mapper.readTree(request.toJson()));
     }
 
-    @Test
     public void testGetValueFromResponse() throws JsonProcessingException {
         String jobID = "{\"job_id\": \"job-1739930402\"}";
         assertEquals("job-1739930402", RemoteIndexClient.getValueFromResponse(jobID, "job_id"));
