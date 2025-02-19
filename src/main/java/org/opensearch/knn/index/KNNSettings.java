@@ -32,6 +32,7 @@ import org.opensearch.knn.quantization.models.quantizationState.QuantizationStat
 import org.opensearch.monitor.jvm.JvmInfo;
 import org.opensearch.monitor.os.OsProbe;
 
+import java.io.IOException;
 import java.security.InvalidParameterException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -68,7 +69,6 @@ public class KNNSettings {
 
     private static final int INDEX_THREAD_QTY_MAX = 32;
     private static final QuantizationStateCacheManager quantizationStateCacheManager = QuantizationStateCacheManager.getInstance();
-    private static final RemoteIndexClient remoteIndexClient = RemoteIndexClient.getInstance();
 
     /**
      * Settings name
@@ -102,6 +102,7 @@ public class KNNSettings {
     public static final String KNN_REMOTE_BUILD_SERVICE_ENDPOINT = "knn.remote_build_service.endpoint";
     public static final String KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL = "knn.remote_build_service.poll_interval";
     public static final String KNN_REMOTE_BUILD_SERVICE_TIMEOUT = "knn.remote_build_service.timeout";
+    public static final String KNN_REMOTE_BUILD_SERVICE_USERNAME = "knn.remote_build_service.username";
     public static final String KNN_REMOTE_BUILD_SERVICE_PASSWORD = "knn.remote_build_service.password";
 
     /**
@@ -424,7 +425,12 @@ public class KNNSettings {
         Dynamic
     );
 
-    public static final Setting<SecureString> KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING = SecureSetting.secureString(
+    static final Setting<SecureString> KNN_REMOTE_BUILD_SERVICE_USERNAME_SETTING = SecureSetting.secureString(
+        KNN_REMOTE_BUILD_SERVICE_USERNAME,
+        null
+    );
+
+    static final Setting<SecureString> KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING = SecureSetting.secureString(
         KNN_REMOTE_BUILD_SERVICE_PASSWORD,
         null
     );
@@ -514,7 +520,11 @@ public class KNNSettings {
             quantizationStateCacheManager.rebuildCache();
         });
         clusterService.getClusterSettings().addSettingsUpdateConsumer(KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING, it -> {
-            remoteIndexClient.rebuildClient();
+            try {
+                RemoteIndexClient.getInstance().rebuildClient();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         });
     }
 
@@ -602,6 +612,14 @@ public class KNNSettings {
             return KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING;
         }
 
+        if (KNN_REMOTE_BUILD_SERVICE_USERNAME.equals(key)) {
+            return KNN_REMOTE_BUILD_SERVICE_USERNAME_SETTING;
+        }
+
+        if (KNN_REMOTE_BUILD_SERVICE_PASSWORD.equals(key)) {
+            return KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING;
+        }
+
         throw new IllegalArgumentException("Cannot find setting by key [" + key + "]");
     }
 
@@ -632,6 +650,7 @@ public class KNNSettings {
             KNN_REMOTE_BUILD_SERVICE_ENDPOINT_SETTING,
             KNN_REMOTE_BUILD_SERVICE_TIMEOUT_SETTING,
             KNN_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SETTING,
+            KNN_REMOTE_BUILD_SERVICE_USERNAME_SETTING,
             KNN_REMOTE_BUILD_SERVICE_PASSWORD_SETTING
         );
         return Stream.concat(settings.stream(), Stream.concat(getFeatureFlags().stream(), dynamicCacheSettings.values().stream()))
