@@ -15,7 +15,9 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.Version;
 import org.junit.Before;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.SetOnce;
 import org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer;
 import org.opensearch.common.blobstore.BlobPath;
@@ -30,10 +32,16 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexSettings;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.index.KNNSettings;
+import org.opensearch.cluster.metadata.RepositoryMetadata;
+import org.opensearch.common.settings.Settings;
+import org.opensearch.knn.KNNTestCase;
+import org.opensearch.knn.common.KNNConstants;
+import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategy;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.index.remote.RemoteBuildRequest;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValuesFactory;
@@ -264,5 +272,63 @@ public class RemoteIndexBuildStrategyTests extends KNNTestCase {
         verify(mockBlobStore).blobContainer(any());
         verify(mockRepository).basePath();
 
+    }
+
+    public void testBuildRequest() throws IOException {
+        RepositoriesService repositoriesService = mock(RepositoriesService.class);
+        BlobStoreRepository blobStoreRepository = mock(BlobStoreRepository.class);
+        RepositoryMetadata metadata = mock(RepositoryMetadata.class);
+        Settings repoSettings = Settings.builder().put("bucket", "test-bucket").build();
+
+        when(metadata.type()).thenReturn("s3");
+        when(metadata.settings()).thenReturn(repoSettings);
+        when(blobStoreRepository.getMetadata()).thenReturn(metadata);
+        when(repositoriesService.repository("test-repo")).thenReturn(blobStoreRepository);
+
+        KNNSettings knnSettingsMock = mock(KNNSettings.class);
+        when(knnSettingsMock.getSettingValue(KNN_REMOTE_VECTOR_REPO_SETTING.getKey())).thenReturn("test-repo");
+
+        IndexSettings mockIndexSettings = mock(IndexSettings.class);
+        Settings indexSettingsSettings = Settings.builder().put(ClusterName.CLUSTER_NAME_SETTING.getKey(), "test-cluster").build();
+        when(mockIndexSettings.getSettings()).thenReturn(indexSettingsSettings);
+
+        try (MockedStatic<KNNSettings> knnSettingsStaticMock = Mockito.mockStatic(KNNSettings.class)) {
+            knnSettingsStaticMock.when(KNNSettings::state).thenReturn(knnSettingsMock);
+
+            final SetOnce<Boolean> fallback = new SetOnce<>();
+            RemoteIndexBuildStrategy objectUnderTest = new RemoteIndexBuildStrategy(
+                () -> repositoriesService,
+                new TestIndexBuildStrategy(fallback),
+                mockIndexSettings
+            );
+
+            List<float[]> vectorValues = List.of(new float[] { 1, 2 }, new float[] { 2, 3 });
+            final TestVectorValues.PreDefinedFloatVectorValues randomVectorValues = new TestVectorValues.PreDefinedFloatVectorValues(
+                vectorValues
+            );
+            final KNNVectorValues<byte[]> knnVectorValues = KNNVectorValuesFactory.getVectorValues(
+                VectorDataType.FLOAT,
+                randomVectorValues
+            );
+
+            BuildIndexParams buildIndexParams = BuildIndexParams.builder()
+                .knnEngine(KNNEngine.FAISS)
+                .vectorDataType(VectorDataType.FLOAT)
+                .parameters(Map.of(KNNConstants.SPACE_TYPE, "l2"))
+                .knnVectorValuesSupplier(() -> knnVectorValues)
+                .totalLiveDocs(vectorValues.size())
+                .build();
+
+            RemoteBuildRequest request = objectUnderTest.constructBuildRequest(buildIndexParams, "blob");
+
+            assertEquals("s3", request.getRepositoryType());
+            assertEquals("test-bucket", request.getContainerName());
+            assertEquals("faiss", request.getEngine());
+            assertEquals("float", request.getDataType()); // TODO this will be in {fp16, fp32, byte, binary}
+            assertEquals("blob.knnvec", request.getVectorPath());
+            assertEquals("blob.knndid", request.getDocIdPath());
+            assertEquals("test-cluster", request.getTenantId());
+            assertEquals(vectorValues.size(), request.getDocCount());
+        }
     }
 }

@@ -9,6 +9,7 @@ import com.google.common.annotations.VisibleForTesting;
 import lombok.extern.log4j.Log4j2;
 import org.apache.commons.lang.NotImplementedException;
 import org.opensearch.action.LatchedActionListener;
+import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.CheckedTriFunction;
 import org.opensearch.common.StopWatch;
 import org.opensearch.common.StreamContext;
@@ -22,10 +23,13 @@ import org.opensearch.common.blobstore.stream.write.WritePriority;
 import org.opensearch.common.io.InputStreamContainer;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexSettings;
+import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategy;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
+import org.opensearch.knn.index.remote.RemoteBuildRequest;
+import org.opensearch.knn.index.remote.RemoteIndexClient;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.repositories.Repository;
@@ -34,6 +38,8 @@ import org.opensearch.repositories.blobstore.BlobStoreRepository;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -142,17 +148,18 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
             log.debug("Repository write took {} ms for vector field [{}]", time_in_millis, indexInfo.getFieldName());
 
             stopWatch = new StopWatch().start();
-            submitVectorBuild();
+            RemoteBuildRequest buildRequest = constructBuildRequest(indexInfo, blobName);
+            String jobId = RemoteIndexClient.getInstance().submitVectorBuild(buildRequest);
             time_in_millis = stopWatch.stop().totalTime().millis();
             log.debug("Submit vector build took {} ms for vector field [{}]", time_in_millis, indexInfo.getFieldName());
 
             stopWatch = new StopWatch().start();
-            awaitVectorBuild();
+            String indexPath = awaitVectorBuild(jobId);
             time_in_millis = stopWatch.stop().totalTime().millis();
             log.debug("Await vector build took {} ms for vector field [{}]", time_in_millis, indexInfo.getFieldName());
 
             stopWatch = new StopWatch().start();
-            readFromRepository();
+            readFromRepository(indexPath);
             time_in_millis = stopWatch.stop().totalTime().millis();
             log.debug("Repository read took {} ms for vector field [{}]", time_in_millis, indexInfo.getFieldName());
         } catch (Exception e) {
@@ -341,6 +348,48 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
     }
 
     /**
+     * Construct the RemoteBuildRequest object for the index build request
+     * @return RemoteBuildRequest with parameters set
+     */
+    public RemoteBuildRequest constructBuildRequest(BuildIndexParams indexInfo, String blobName) throws IOException {
+        String repositoryType = getRepository().getMetadata().type();
+        String containerName = switch (repositoryType) {
+            case "s3" -> getRepository().getMetadata().settings().get("bucket");
+            case "fs" -> getRepository().getMetadata().settings().get("location");
+            default -> throw new IllegalStateException("Unexpected value: " + repositoryType);
+        };
+        String vectorPath = blobName + VECTOR_BLOB_FILE_EXTENSION;
+        String docIdPath = blobName + DOC_ID_FILE_EXTENSION;
+        String tenantId = indexSettings.getSettings().get(ClusterName.CLUSTER_NAME_SETTING.getKey());
+        int docCount = indexInfo.getTotalLiveDocs();
+        String spaceType = indexInfo.getParameters().get(KNNConstants.SPACE_TYPE).toString();
+        String engine = indexInfo.getKnnEngine().getName();
+
+        String dataType = indexInfo.getVectorDataType().getValue(); // TODO need to fetch encoder param to get fp16 vs fp32
+        int dimension = 0; // TODO
+        Map<String, Object> algorithmParams = new HashMap<>(); // TODO fetch the below from index mapping
+        algorithmParams.put("ef_construction", 100);
+        algorithmParams.put("m", 16);
+
+        Map<String, Object> indexParameters = new HashMap<>();
+        indexParameters.put("algorithm", "hnsw");
+        indexParameters.put("algorithm_parameters", algorithmParams);
+
+        return RemoteBuildRequest.builder()
+            .repositoryType(repositoryType)
+            .containerName(containerName)
+            .vectorPath(vectorPath)
+            .docIdPath(docIdPath)
+            .tenantId(tenantId)
+            .dimension(dimension)
+            .docCount(docCount)
+            .dataType(dataType)
+            .engine(engine)
+            .indexParameters(indexParameters)
+            .build();
+    }
+
+    /**
      * Submit vector build request to remote vector build service
      *
      */
@@ -351,14 +400,14 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
     /**
      * Wait on remote vector build to complete
      */
-    private void awaitVectorBuild() {
+    private String awaitVectorBuild(String jobId) {
         throw new NotImplementedException();
     }
 
     /**
      * Read constructed vector file from remote repository and write to IndexOutput
      */
-    private void readFromRepository() {
+    private void readFromRepository(String indexPath) {
         throw new NotImplementedException();
     }
 }

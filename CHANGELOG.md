@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Features
 * [Remote Vector Index Build] Introduce Remote Native Index Build feature flag, settings, and initial skeleton [#2525](https://github.com/opensearch-project/k-NN/pull/2525)
 * [Remote Vector Index Build] Implement vector data upload and vector data size threshold setting [#2550](https://github.com/opensearch-project/k-NN/pull/2550)
+* [Remote Vector Index Build] Introduce Client Skeleton + basic Build Request implementation [#2548](https://github.com/opensearch-project/k-NN/pull/2548/files)
 ### Enhancements
 ### Bug Fixes
 ### Infrastructure
