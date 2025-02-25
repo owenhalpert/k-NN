@@ -35,8 +35,10 @@ import java.nio.charset.StandardCharsets;
 public class RemoteIndexClient {
     private static RemoteIndexClient INSTANCE;
     private volatile CloseableHttpClient httpClient;
-    public static final int MAX_RETRIES = 1; // 2 total attempts
-    public static final long BASE_DELAY_MS = 1000;
+    protected static final int MAX_RETRIES = 1; // 2 total attempts
+    protected static final long BASE_DELAY_MS = 1000;
+    private String BUILD_ENDPOINT = "/_build";
+    private String STATUS_ENDPOINT = "/_status";
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -60,24 +62,23 @@ public class RemoteIndexClient {
      * @return The HTTP Client
      */
     private CloseableHttpClient createHttpClient() {
-        // TODO The client will need to be rebuilt iff we decide to allow for retry configuration in the future
         return HttpClients.custom().setRetryStrategy(new RemoteIndexClientRetryStrategy()).build();
     }
 
     /**
-    * Submit a build to the Remote Vector Build Service endpoint using round robin task assignment.
+    * Submit a build to the Remote Vector Build Service endpoint.
     * @return job_id from the server response used to track the job
     */
     public String submitVectorBuild(RemoteBuildRequest request) throws IOException {
         URI endpoint = URI.create(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT));
-        HttpPost buildRequest = new HttpPost(endpoint + "/_build");
+        HttpPost buildRequest = new HttpPost(endpoint + BUILD_ENDPOINT);
         buildRequest.setHeader("Content-Type", "application/json");
         buildRequest.setEntity(new StringEntity(request.toJson()));
         authenticateRequest(buildRequest);
 
         String response = httpClient.execute(buildRequest, body -> {
             if (body.getCode() != 200) {
-                throw new IOException("Failed to submit build request after retries with code: " + body.getCode());
+                throw new IOException("Failed to submit build request, got status code: " + body.getCode());
             }
             return EntityUtils.toString(body.getEntity());
         });
@@ -105,7 +106,7 @@ public class RemoteIndexClient {
      */
     private String getBuildStatus(String jobId) throws IOException {
         URI endpoint = URI.create(KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT));
-        HttpGet request = new HttpGet(endpoint + "/_status/" + jobId);
+        HttpGet request = new HttpGet(endpoint + STATUS_ENDPOINT + "/"+ jobId);
         authenticateRequest(request);
         return httpClient.execute(request, new BasicHttpClientResponseHandler());
     }

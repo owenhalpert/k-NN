@@ -351,13 +351,12 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
      * Construct the RemoteBuildRequest object for the index build request
      * @return RemoteBuildRequest with parameters set
      */
-    public RemoteBuildRequest constructBuildRequest(BuildIndexParams indexInfo, String blobName) throws IOException {
+    protected RemoteBuildRequest constructBuildRequest(BuildIndexParams indexInfo, String blobName) throws IOException {
         String repositoryType = getRepository().getMetadata().type();
-        String containerName = switch (repositoryType) {
-            case "s3" -> getRepository().getMetadata().settings().get("bucket");
-            case "fs" -> getRepository().getMetadata().settings().get("location");
-            default -> throw new IllegalStateException("Unexpected value: " + repositoryType);
-        };
+        if (!repositoryType.equals("s3")) {
+            throw new IllegalArgumentException("Repository type " + repositoryType + " is not supported by the remote build service");
+        }
+        String containerName = getRepository().getMetadata().settings().get("bucket");
         String vectorPath = blobName + VECTOR_BLOB_FILE_EXTENSION;
         String docIdPath = blobName + DOC_ID_FILE_EXTENSION;
         String tenantId = indexSettings.getSettings().get(ClusterName.CLUSTER_NAME_SETTING.getKey());

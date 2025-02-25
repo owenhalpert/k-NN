@@ -137,6 +137,7 @@ public class KNNSettings {
     // TODO: Tune this default value based on benchmarking
     public static final ByteSizeValue KNN_REMOTE_VECTOR_BUILD_THRESHOLD_DEFAULT_VALUE = new ByteSizeValue(50, ByteSizeUnit.MB);
 
+    // TODO: Tune these default values based on benchmarking
     public static final Integer KNN_DEFAULT_REMOTE_BUILD_SERVICE_TIMEOUT_MINUTES = 60;
     public static final Integer KNN_DEFAULT_REMOTE_BUILD_SERVICE_POLL_INTERVAL_SECONDS = 30;
 

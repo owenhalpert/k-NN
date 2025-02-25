@@ -17,14 +17,18 @@ import java.net.ConnectException;
 import java.net.NoRouteToHostException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * The public constructors for the Apache HTTP client default retry strategies allow customization of max retries
- * and retry interval, but not retriable status codes.
- * In order to add the other retriable status codes from our Remote Build API Contract, we must extend this class.
+ * and retry interval, but not retryable status codes.
+ * In order to add the other retryable status codes from our Remote Build API Contract, we must extend this class.
  * @see org.apache.hc.client5.http.impl.DefaultHttpRequestRetryStrategy
  */
 public class RemoteIndexClientRetryStrategy extends DefaultHttpRequestRetryStrategy {
+    private static final List<Integer> retryableCodes = Arrays.asList(408, 429, 500, 502, 503, 504, 509);
+    private static final List<Integer> backoffCodes = Arrays.asList(429, 503);
+
     public RemoteIndexClientRetryStrategy() {
         super(
             RemoteIndexClient.MAX_RETRIES,
@@ -37,16 +41,18 @@ public class RemoteIndexClientRetryStrategy extends DefaultHttpRequestRetryStrat
                 NoRouteToHostException.class,
                 SSLException.class
             ),
-            Arrays.asList(408, 429, 500, 502, 503, 504, 509)
+            retryableCodes
         );
     }
 
     /**
-    * Override retry interval setting to implement backoff strategy. This is only relevant for future implementations where we may increase the retry count from 1 max retry.
+    * Override retry interval setting to implement backoff strategy.
+     * Throttling codes may come with their own 'Retry-After' header which will take precedent over the below.
+     * This is only relevant for future implementations where we may increase the retry count from 1 max retry.
     */
     @Override
     public TimeValue getRetryInterval(HttpResponse response, int execCount, HttpContext context) {
-        if (response.getCode() == 429 || response.getCode() == 503) {
+        if (backoffCodes.contains(response.getCode())) {
             long delay = RemoteIndexClient.BASE_DELAY_MS;
             long backoffDelay = delay * (long) Math.pow(2, execCount - 1);
             return TimeValue.ofMilliseconds(Math.min(backoffDelay, TimeValue.ofMinutes(1).toMilliseconds()));
