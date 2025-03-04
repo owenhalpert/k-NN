@@ -9,6 +9,7 @@ import org.opensearch.common.ValidationException;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.remote.RemoteIndexParameters;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -146,7 +147,7 @@ public interface KNNLibrary extends MethodResolver {
      * Returns whether or not the engine implementation supports remote index build
      * @return true if remote index build is supported, false otherwise
      */
-    default boolean supportsRemoteIndexBuild() {
+    default boolean supportsRemoteIndexBuild(Map<String, String> attributes) throws IOException {
         return false;
     }
 
