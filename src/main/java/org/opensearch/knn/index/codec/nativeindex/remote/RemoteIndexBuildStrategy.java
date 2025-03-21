@@ -106,20 +106,20 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
 
         // If setting is not enabled, return false
         if (!indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SETTING)) {
-            log.debug("Remote index build is disabled for index: [{}]", indexSettings.getIndex().getName());
+            log.info("Remote index build is disabled for index: [{}]", indexSettings.getIndex().getName());
             return false;
         }
 
         // If vector repo is not configured, return false
         String vectorRepo = KNNSettings.state().getSettingValue(KNN_REMOTE_VECTOR_REPO_SETTING.getKey());
         if (vectorRepo == null || vectorRepo.isEmpty()) {
-            log.debug("Vector repo is not configured, falling back to local build for index: [{}]", indexSettings.getIndex().getName());
+            log.info("Vector repo is not configured, falling back to local build for index: [{}]", indexSettings.getIndex().getName());
             return false;
         }
 
         // If size threshold is not met, return false
         if (vectorBlobLength < indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_THRESHOLD_SETTING).getBytes()) {
-            log.debug(
+            log.info(
                 "Data size [{}] is less than remote index build threshold [{}], falling back to local build for index [{}]",
                 vectorBlobLength,
                 indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_THRESHOLD_SETTING).getBytes(),
@@ -195,14 +195,46 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         );
 
         StopWatch stopWatch = new StopWatch().start();
+        long time_in_millis;
+
+        Runtime runtime = Runtime.getRuntime();
+        long initialUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+
         try {
+            // Calculate total bytes to be written
+            KNNVectorValues<?> knnVectorValues = indexInfo.getKnnVectorValuesSupplier().get();
+            initializeVectorValues(knnVectorValues);
+            long totalBytes = (long) indexInfo.getTotalLiveDocs() * knnVectorValues.bytesPerVector();
+            int bufferSize = (int) KNNSettings.state().getUploadBufferSize().getBytes();
+
             vectorRepositoryAccessor.writeToRepository(
-                repositoryContext.blobName,
-                indexInfo.getTotalLiveDocs(),
-                indexInfo.getVectorDataType(),
-                indexInfo.getKnnVectorValuesSupplier()
+                    repositoryContext.blobName,
+                    indexInfo.getTotalLiveDocs(),
+                    indexInfo.getVectorDataType(),
+                    indexInfo.getKnnVectorValuesSupplier()
             );
-            recordRepositoryWriteSuccess(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName());
+            time_in_millis = stopWatch.stop().totalTime().millis();
+
+            // Get memory stats after
+            long finalUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+            long memoryDelta = finalUsedMemory - initialUsedMemory;
+
+            double throughputMBps = (totalBytes / (1024.0 * 1024.0)) / (time_in_millis / 1000.0);
+
+            recordRepositoryWriteSuccess(time_in_millis, indexInfo.getFieldName());
+
+            log.info("Repository write metrics for vector field [{}]: Buffer Size: {} bytes, Total Bytes: {} bytes, Time: {} ms, Throughput: {} MB/s, Vectors Written: {}, Bytes per Vector: {} bytes, Memory Delta: {} MB, Free Memory: {} MB, Total Memory: {} MB",
+                    indexInfo.getFieldName(),
+                    bufferSize,
+                    totalBytes,
+                    time_in_millis,
+                    String.format("%.2f", throughputMBps),
+                    indexInfo.getTotalLiveDocs(),
+                    knnVectorValues.bytesPerVector(),
+                    String.format("%.2f", memoryDelta / (1024.0 * 1024.0)),
+                    runtime.freeMemory() / (1024 * 1024),
+                    runtime.totalMemory() / (1024 * 1024)
+            );
         } catch (Exception e) {
             recordRepositoryWriteFailure(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName(), e);
             throw e;

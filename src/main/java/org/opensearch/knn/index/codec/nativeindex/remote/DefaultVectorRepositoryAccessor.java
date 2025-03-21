@@ -17,6 +17,7 @@ import org.opensearch.common.blobstore.stream.write.WriteContext;
 import org.opensearch.common.blobstore.stream.write.WritePriority;
 import org.opensearch.common.io.InputStreamContainer;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
@@ -59,14 +60,16 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         VectorDataType vectorDataType,
         Supplier<KNNVectorValues<?>> knnVectorValuesSupplier
     ) throws IOException, InterruptedException {
+        int bufferSize = (int) KNNSettings.state().getUploadBufferSize().getBytes();
+        boolean forceSingleStream = KNNSettings.state().getForceSingleStreamUpload();
         assert blobContainer != null;
         KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
         initializeVectorValues(knnVectorValues);
         long vectorBlobLength = (long) knnVectorValues.bytesPerVector() * totalLiveDocs;
 
-        if (blobContainer instanceof AsyncMultiStreamBlobContainer asyncBlobContainer) {
+        if (blobContainer instanceof AsyncMultiStreamBlobContainer asyncBlobContainer && !forceSingleStream) {
             // First initiate vectors upload
-            log.debug("Container {} Supports Parallel Blob Upload", blobContainer);
+            log.info("Container {} Supports Parallel Blob Upload", blobContainer);
             // WriteContext is the main entry point into asyncBlobUpload. It stores all of our upload configurations, analogous to
             // BuildIndexParams
             WriteContext writeContext = createWriteContext(blobName, vectorBlobLength, knnVectorValuesSupplier, vectorDataType);
@@ -76,7 +79,7 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
             asyncBlobContainer.asyncBlobUpload(writeContext, new LatchedActionListener<>(new ActionListener<>() {
                 @Override
                 public void onResponse(Void unused) {
-                    log.debug(
+                    log.info(
                         "Parallel vector upload succeeded for blob {} with size {}",
                         blobName + VECTOR_BLOB_FILE_EXTENSION,
                         vectorBlobLength
@@ -98,24 +101,27 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
             // Then upload doc id blob before waiting on vector uploads
             // TODO: We wrap with a BufferedInputStream to support retries. We can tune this buffer size to optimize performance.
             // Note: We do not use the parallel upload API here as the doc id blob will be much smaller than the vector blob
-            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer);
+            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer, bufferSize);
             latch.await();
             if (exception.get() != null) {
                 throw new IOException(exception.get());
             }
         } else {
-            log.debug("Container {} Does Not Support Parallel Blob Upload", blobContainer);
+            if (forceSingleStream) {
+                log.info("Using single stream upload because knn.force.single.stream.upload is true");
+            } else {
+                log.info("Container {} Does Not Support Parallel Blob Upload", blobContainer);
+            }
             // Write Vectors
             try (
                 InputStream vectorStream = new BufferedInputStream(
-                    new VectorValuesInputStream(knnVectorValuesSupplier.get(), vectorDataType)
-                )
+                    new VectorValuesInputStream(knnVectorValuesSupplier.get(), vectorDataType), bufferSize)
             ) {
-                log.info("Writing {} bytes for {} docs to {}", vectorBlobLength, totalLiveDocs, blobName + VECTOR_BLOB_FILE_EXTENSION);
+                log.info("Vector write: Writing {} bytes for {} docs to {} with buffer size {}", vectorBlobLength, totalLiveDocs, blobName + VECTOR_BLOB_FILE_EXTENSION, bufferSize);
                 blobContainer.writeBlob(blobName + VECTOR_BLOB_FILE_EXTENSION, vectorStream, vectorBlobLength, true);
             }
             // Then write doc ids
-            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer);
+            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer, bufferSize);
         }
     }
 
@@ -133,14 +139,16 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         long vectorBlobLength,
         long totalLiveDocs,
         String blobName,
-        BlobContainer blobContainer
+        BlobContainer blobContainer,
+        int bufferSize
     ) throws IOException {
-        try (InputStream docStream = new BufferedInputStream(new DocIdInputStream(knnVectorValues))) {
+        try (InputStream docStream = new BufferedInputStream(new DocIdInputStream(knnVectorValues), bufferSize)) {
             log.info(
-                "Writing {} bytes for {} docs ids to {}",
+                "Doc ID write: Writing {} bytes for {} docs ids to {} with buffer size {}",
                 vectorBlobLength,
                 totalLiveDocs * Integer.BYTES,
-                blobName + DOC_ID_FILE_EXTENSION
+                blobName + DOC_ID_FILE_EXTENSION,
+                    bufferSize
             );
             blobContainer.writeBlob(blobName + DOC_ID_FILE_EXTENSION, docStream, totalLiveDocs * Integer.BYTES, true);
         }
