@@ -10,13 +10,16 @@ import lombok.extern.log4j.Log4j2;
 import org.apache.commons.lang.StringUtils;
 import org.opensearch.action.LatchedActionListener;
 import org.opensearch.common.CheckedTriFunction;
+import org.opensearch.common.StopWatch;
 import org.opensearch.common.StreamContext;
 import org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer;
 import org.opensearch.common.blobstore.BlobContainer;
+import org.opensearch.common.blobstore.BlobMetadata;
 import org.opensearch.common.blobstore.stream.write.WriteContext;
 import org.opensearch.common.blobstore.stream.write.WritePriority;
 import org.opensearch.common.io.InputStreamContainer;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
@@ -25,13 +28,15 @@ import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorValues;
 import static org.opensearch.knn.common.KNNConstants.DOC_ID_FILE_EXTENSION;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_BLOB_FILE_EXTENSION;
+import static org.opensearch.knn.index.KNNSettings.state;
+import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorValues;
 
 @Log4j2
 @AllArgsConstructor
@@ -59,12 +64,14 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         VectorDataType vectorDataType,
         Supplier<KNNVectorValues<?>> knnVectorValuesSupplier
     ) throws IOException, InterruptedException {
+        int bufferSize = (int) state().getUploadBufferSize().getBytes();
+        boolean forceSingleStream = state().getForceSingleStreamUpload();
         assert blobContainer != null;
         KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
         initializeVectorValues(knnVectorValues);
         long vectorBlobLength = (long) knnVectorValues.bytesPerVector() * totalLiveDocs;
 
-        if (blobContainer instanceof AsyncMultiStreamBlobContainer asyncBlobContainer) {
+        if (blobContainer instanceof AsyncMultiStreamBlobContainer asyncBlobContainer && !forceSingleStream) {
             // First initiate vectors upload
             log.debug("Container {} Supports Parallel Blob Upload", blobContainer);
             // WriteContext is the main entry point into asyncBlobUpload. It stores all of our upload configurations, analogous to
@@ -85,7 +92,7 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
 
                 @Override
                 public void onFailure(Exception e) {
-                    log.error(
+                    log.debug(
                         "Parallel vector upload failed for blob {} with size {}",
                         blobName + VECTOR_BLOB_FILE_EXTENSION,
                         vectorBlobLength,
@@ -98,24 +105,75 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
             // Then upload doc id blob before waiting on vector uploads
             // TODO: We wrap with a BufferedInputStream to support retries. We can tune this buffer size to optimize performance.
             // Note: We do not use the parallel upload API here as the doc id blob will be much smaller than the vector blob
-            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer);
+            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer, bufferSize);
             latch.await();
             if (exception.get() != null) {
                 throw new IOException(exception.get());
             }
         } else {
-            log.debug("Container {} Does Not Support Parallel Blob Upload", blobContainer);
-            // Write Vectors
+            if (forceSingleStream) {
+                log.debug("Using single stream upload because knn.force.single.stream.upload is true");
+            } else {
+                log.debug("Container {} Does Not Support Parallel Blob Upload", blobContainer);
+            }
+
+            StopWatch vectorStopWatch = new StopWatch().start();
+            Runtime runtime = Runtime.getRuntime();
+            long initialUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+
             try (
                 InputStream vectorStream = new BufferedInputStream(
-                    new VectorValuesInputStream(knnVectorValuesSupplier.get(), vectorDataType)
+                    new VectorValuesInputStream(knnVectorValuesSupplier.get(), vectorDataType),
+                    bufferSize
                 )
             ) {
-                log.info("Writing {} bytes for {} docs to {}", vectorBlobLength, totalLiveDocs, blobName + VECTOR_BLOB_FILE_EXTENSION);
+                log.debug(
+                    "Writing {} bytes for {} docs to {} with buffer size {}",
+                    vectorBlobLength,
+                    totalLiveDocs,
+                    blobName + VECTOR_BLOB_FILE_EXTENSION,
+                    bufferSize
+                );
                 blobContainer.writeBlob(blobName + VECTOR_BLOB_FILE_EXTENSION, vectorStream, vectorBlobLength, true);
             }
-            // Then write doc ids
-            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer);
+
+            long vectorTime = vectorStopWatch.stop().totalTime().millis();
+            long finalUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+            double vectorThroughputMBps = (vectorBlobLength / (1024.0 * 1024.0)) / (vectorTime / 1000.0);
+
+            log.info(
+                "Vector write metrics: Buffer Size: {} bytes, Total Bytes: {} bytes, Time: {} ms, "
+                    + "Throughput: {} MB/s, Vectors Written: {}, Bytes per Vector: {} bytes, "
+                    + "Memory Delta: {} MB",
+                bufferSize,
+                vectorBlobLength,
+                vectorTime,
+                String.format("%.2f", vectorThroughputMBps),
+                totalLiveDocs,
+                knnVectorValues.bytesPerVector(),
+                String.format("%.2f", (finalUsedMemory - initialUsedMemory) / (1024.0 * 1024.0))
+            );
+
+            StopWatch docIdStopWatch = new StopWatch().start();
+            initialUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+
+            writeDocIds(knnVectorValuesSupplier.get(), vectorBlobLength, totalLiveDocs, blobName, blobContainer, bufferSize);
+
+            long docIdTime = docIdStopWatch.stop().totalTime().millis();
+            finalUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+            long docIdBytes = (long) totalLiveDocs * Integer.BYTES;
+            double docIdThroughputMBps = (docIdBytes / (1024.0 * 1024.0)) / (docIdTime / 1000.0);
+
+            log.info(
+                "Doc ID write metrics: Buffer Size: {} bytes, Total Bytes: {} bytes, Time: {} ms, "
+                    + "Throughput: {} MB/s, Doc IDs Written: {}, Memory Delta: {} KB",
+                bufferSize,
+                docIdBytes,
+                docIdTime,
+                String.format("%.2f", docIdThroughputMBps),
+                totalLiveDocs,
+                String.format("%.2f", (finalUsedMemory - initialUsedMemory) / 1024.0)
+            );
         }
     }
 
@@ -133,14 +191,16 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         long vectorBlobLength,
         long totalLiveDocs,
         String blobName,
-        BlobContainer blobContainer
+        BlobContainer blobContainer,
+        int bufferSize
     ) throws IOException {
-        try (InputStream docStream = new BufferedInputStream(new DocIdInputStream(knnVectorValues))) {
-            log.info(
-                "Writing {} bytes for {} docs ids to {}",
-                vectorBlobLength,
+        try (InputStream docStream = new BufferedInputStream(new DocIdInputStream(knnVectorValues), bufferSize)) {
+            log.debug(
+                "Doc ID write: Writing {} bytes for {} docs ids to {} with buffer size {}",
                 totalLiveDocs * Integer.BYTES,
-                blobName + DOC_ID_FILE_EXTENSION
+                totalLiveDocs,
+                blobName + DOC_ID_FILE_EXTENSION,
+                bufferSize
             );
             blobContainer.writeBlob(blobName + DOC_ID_FILE_EXTENSION, docStream, totalLiveDocs * Integer.BYTES, true);
         }
@@ -186,7 +246,7 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         VectorDataType vectorDataType
     ) {
         return ((partNo, size, position) -> {
-            log.info("Creating InputStream for partNo: {}, size: {}, position: {}", partNo, size, position);
+            log.debug("Creating InputStream for partNo: {}, size: {}, position: {}", partNo, size, position);
             VectorValuesInputStream vectorValuesInputStream = new VectorValuesInputStream(
                 knnVectorValuesSupplier.get(),
                 vectorDataType,
@@ -233,7 +293,30 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
 
         // TODO: We are using the sequential download API as multi-part parallel download is difficult for us to implement today and
         // requires some changes in core. For more details, see: https://github.com/opensearch-project/k-NN/issues/2464
+        Runtime runtime = Runtime.getRuntime();
+        StopWatch readStopwatch = new StopWatch().start();
+        long initialUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+
+        Map<String, BlobMetadata> blobMetadataMap = blobContainer.listBlobsByPrefix(fileName);
+        BlobMetadata metadata = blobMetadataMap.get(fileName);
+        long fileSize = metadata != null ? metadata.length() : -1;
+
         InputStream graphStream = blobContainer.readBlob(fileName);
+
         indexOutputWithBuffer.writeFromStreamWithBuffer(graphStream);
+
+        long readTime = readStopwatch.stop().totalTime().millis();
+        long finalUsedMemory = runtime.totalMemory() - runtime.freeMemory();
+        double throughputMBps = (fileSize / (1024.0 * 1024.0)) / (readTime / 1000.0);
+
+        log.info(
+            "Repository read metrics: Buffer Size: {} bytes, Total Bytes: {} bytes, Time: {} ms, "
+                + "Throughput: {} MB/s, Memory Delta: {} MB",
+            KNNSettings.getDownloadBufferSize().getBytes(),
+            fileSize,
+            readTime,
+            String.format("%.2f", throughputMBps),
+            String.format("%.2f", (finalUsedMemory - initialUsedMemory) / (1024.0 * 1024.0))
+        );
     }
 }

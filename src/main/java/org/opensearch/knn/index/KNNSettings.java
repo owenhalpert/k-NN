@@ -103,6 +103,12 @@ public class KNNSettings {
     public static final String KNN_REMOTE_BUILD_CLIENT_TIMEOUT = "knn.remote_index_build.client.timeout";
     public static final String KNN_REMOTE_BUILD_CLIENT_USERNAME = "knn.remote_index_build.client.username";
     public static final String KNN_REMOTE_BUILD_CLIENT_PASSWORD = "knn.remote_index_build.client.password";
+    public static final String KNN_UPLOAD_BUFFER_SIZE = "knn.upload.buffer.size";
+    public static final String KNN_DOWNLOAD_BUFFER_SIZE = "knn.download.buffer.size";
+    public static final String KNN_FORCE_SINGLE_STREAM_UPLOAD = "knn.force.single.stream.upload";
+    public static final String KNN_DOWNLOAD_FILENAME = "knn.download.filename";
+    public static final String KNN_DOWNLOAD_BLOBPATH = "knn.download.blobpath";
+    public static final String KNN_FORCE_DOWNLOAD = "knn.force.download";
 
     /**
      * Default setting values
@@ -250,6 +256,43 @@ public class KNNSettings {
         Setting.Property.NodeScope,
         Setting.Property.Dynamic
     );
+
+    public static final Setting<ByteSizeValue> KNN_DOWNLOAD_BUFFER_SIZE_SETTING = Setting.byteSizeSetting(
+        KNN_DOWNLOAD_BUFFER_SIZE,
+        new ByteSizeValue(64, ByteSizeUnit.KB),
+        Dynamic,
+        NodeScope
+    );
+
+    public static final Setting<ByteSizeValue> KNN_UPLOAD_BUFFER_SIZE_SETTING = Setting.byteSizeSetting(
+        KNN_UPLOAD_BUFFER_SIZE,
+        new ByteSizeValue(8, ByteSizeUnit.KB),
+        Dynamic,
+        NodeScope
+    );
+
+    public static final Setting<Boolean> KNN_FORCE_SINGLE_STREAM_UPLOAD_SETTING = Setting.boolSetting(
+        KNN_FORCE_SINGLE_STREAM_UPLOAD,
+        false,  // default to false, meaning use multi-stream if available
+        Setting.Property.Dynamic,
+        Setting.Property.NodeScope
+    );
+
+    public ByteSizeValue getUploadBufferSize() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_UPLOAD_BUFFER_SIZE);
+    }
+
+    public static ByteSizeValue getDownloadBufferSize() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_DOWNLOAD_BUFFER_SIZE);
+    }
+
+    public Boolean getForceSingleStreamUpload() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_FORCE_SINGLE_STREAM_UPLOAD);
+    }
+
+    public Boolean getForceDownload() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_FORCE_DOWNLOAD);
+    }
 
     public static final Setting<Boolean> KNN_DERIVED_SOURCE_ENABLED_SETTING = Setting.boolSetting(
         KNN_DERIVED_SOURCE_ENABLED,
@@ -422,6 +465,12 @@ public class KNNSettings {
         KNN_REMOTE_BUILD_CLIENT_PASSWORD,
         null
     );
+
+    public static final Setting<String> KNN_DOWNLOAD_FILENAME_SETTING = Setting.simpleString(KNN_DOWNLOAD_FILENAME, Dynamic, NodeScope);
+
+    public static final Setting<String> KNN_DOWNLOAD_BLOBPATH_SETTING = Setting.simpleString(KNN_DOWNLOAD_BLOBPATH, Dynamic, NodeScope);
+
+    public static final Setting<Boolean> KNN_FORCE_DOWNLOAD_SETTING = Setting.boolSetting(KNN_FORCE_DOWNLOAD, false, Dynamic, NodeScope);
 
     /**
      * Dynamic settings
@@ -629,6 +678,30 @@ public class KNNSettings {
             return KNN_REMOTE_BUILD_CLIENT_PASSWORD_SETTING;
         }
 
+        if (KNN_UPLOAD_BUFFER_SIZE.equals(key)) {
+            return KNN_UPLOAD_BUFFER_SIZE_SETTING;
+        }
+
+        if (KNN_DOWNLOAD_BUFFER_SIZE.equals(key)) {
+            return KNN_DOWNLOAD_BUFFER_SIZE_SETTING;
+        }
+
+        if (KNN_FORCE_SINGLE_STREAM_UPLOAD.equals(key)) {
+            return KNN_FORCE_SINGLE_STREAM_UPLOAD_SETTING;
+        }
+
+        if (KNN_DOWNLOAD_FILENAME.equals(key)) {
+            return KNN_DOWNLOAD_FILENAME_SETTING;
+        }
+
+        if (KNN_FORCE_DOWNLOAD.equals(key)) {
+            return KNN_FORCE_DOWNLOAD_SETTING;
+        }
+
+        if (KNN_DOWNLOAD_BLOBPATH.equals(key)) {
+            return KNN_DOWNLOAD_BLOBPATH_SETTING;
+        }
+
         throw new IllegalArgumentException("Cannot find setting by key [" + key + "]");
     }
 
@@ -659,7 +732,13 @@ public class KNNSettings {
             KNN_REMOTE_BUILD_CLIENT_TIMEOUT_SETTING,
             KNN_REMOTE_BUILD_CLIENT_POLL_INTERVAL_SETTING,
             KNN_REMOTE_BUILD_CLIENT_USERNAME_SETTING,
-            KNN_REMOTE_BUILD_CLIENT_PASSWORD_SETTING
+            KNN_REMOTE_BUILD_CLIENT_PASSWORD_SETTING,
+            KNN_UPLOAD_BUFFER_SIZE_SETTING,
+            KNN_DOWNLOAD_BUFFER_SIZE_SETTING,
+            KNN_FORCE_SINGLE_STREAM_UPLOAD_SETTING,
+            KNN_FORCE_DOWNLOAD_SETTING,
+            KNN_DOWNLOAD_FILENAME_SETTING,
+            KNN_DOWNLOAD_BLOBPATH_SETTING
         );
         return Stream.concat(settings.stream(), Stream.concat(getFeatureFlags().stream(), dynamicCacheSettings.values().stream()))
             .collect(Collectors.toList());
@@ -781,6 +860,14 @@ public class KNNSettings {
      */
     public static String getRemoteBuildServiceEndpoint() {
         return KNNSettings.state().getSettingValue(KNNSettings.KNN_REMOTE_BUILD_SERVICE_ENDPOINT);
+    }
+
+    public String getDownloadFileName() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_DOWNLOAD_FILENAME);
+    }
+
+    public String getDownloadBlobPath() {
+        return KNNSettings.state().getSettingValue(KNNSettings.KNN_DOWNLOAD_BLOBPATH);
     }
 
     /**

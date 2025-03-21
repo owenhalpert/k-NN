@@ -42,6 +42,7 @@ import static org.opensearch.knn.common.KNNConstants.VECTOR_BLOB_FILE_EXTENSION;
 import static org.opensearch.knn.index.KNNSettings.KNN_INDEX_REMOTE_VECTOR_BUILD_SETTING;
 import static org.opensearch.knn.index.KNNSettings.KNN_INDEX_REMOTE_VECTOR_BUILD_THRESHOLD_SETTING;
 import static org.opensearch.knn.index.KNNSettings.KNN_REMOTE_VECTOR_REPO_SETTING;
+import static org.opensearch.knn.index.KNNSettings.state;
 import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorValues;
 import static org.opensearch.knn.plugin.stats.KNNRemoteIndexBuildValue.BUILD_REQUEST_FAILURE_COUNT;
 import static org.opensearch.knn.plugin.stats.KNNRemoteIndexBuildValue.BUILD_REQUEST_SUCCESS_COUNT;
@@ -158,8 +159,16 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
 
         try {
             RepositoryContext repositoryContext = getRepositoryContext(indexInfo);
-
+            if (state().getForceDownload()) {
+                readFromRepository(indexInfo, repositoryContext, KNNSettings.state().getDownloadFileName());
+                return;
+            }
             // 1. Write required data to repository
+            if (isFlush) {
+                log.info("Starting repository write for flush");
+            } else {
+                log.debug("Starting repository write for merge");
+            }
             writeToRepository(repositoryContext, indexInfo);
 
             // 2. Trigger remote index build
@@ -167,10 +176,10 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
             RemoteBuildResponse remoteBuildResponse = submitBuild(repositoryContext, indexInfo, client);
 
             // 3. Await vector build completion
-            RemoteBuildStatusResponse remoteBuildStatusResponse = awaitIndexBuild(remoteBuildResponse, indexInfo, client);
+            // RemoteBuildStatusResponse remoteBuildStatusResponse = awaitIndexBuild(remoteBuildResponse, indexInfo, client);
 
             // 4. Download index file and write to indexOutput
-            readFromRepository(indexInfo, repositoryContext, remoteBuildStatusResponse);
+            readFromRepository(indexInfo, repositoryContext, KNNSettings.state().getDownloadFileName());
 
             endRemoteIndexBuildStats(
                 (long) indexInfo.getTotalLiveDocs() * knnVectorValues.bytesPerVector(),
@@ -195,14 +204,22 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         );
 
         StopWatch stopWatch = new StopWatch().start();
+        long time_in_millis;
+
         try {
+            // Calculate total bytes to be written
+            KNNVectorValues<?> knnVectorValues = indexInfo.getKnnVectorValuesSupplier().get();
+            initializeVectorValues(knnVectorValues);
+
             vectorRepositoryAccessor.writeToRepository(
                 repositoryContext.blobName,
                 indexInfo.getTotalLiveDocs(),
                 indexInfo.getVectorDataType(),
                 indexInfo.getKnnVectorValuesSupplier()
             );
-            recordRepositoryWriteSuccess(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName());
+            time_in_millis = stopWatch.stop().totalTime().millis();
+
+            recordRepositoryWriteSuccess(time_in_millis, indexInfo.getFieldName());
         } catch (Exception e) {
             recordRepositoryWriteFailure(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName(), e);
             throw e;
@@ -279,6 +296,21 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
                 remoteBuildStatusResponse.getFileName(),
                 indexInfo.getIndexOutputWithBuffer()
             );
+            recordRepositoryReadSuccess(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName());
+        } catch (Exception e) {
+            recordRepositoryReadFailure(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName(), e);
+            throw e;
+        }
+    }
+
+    private void readFromRepository(BuildIndexParams indexInfo, RepositoryContext repositoryContext, String fileName) throws IOException {
+        StopWatch stopWatch = new StopWatch().start();
+        try {
+            BlobPath blobPath = getRepository().basePath().add(KNNSettings.state().getDownloadBlobPath());
+            VectorRepositoryAccessor forcedRepositoryAccessor = new DefaultVectorRepositoryAccessor(
+                getRepository().blobStore().blobContainer(blobPath)
+            );
+            forcedRepositoryAccessor.readFromRepository(fileName, indexInfo.getIndexOutputWithBuffer());
             recordRepositoryReadSuccess(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName());
         } catch (Exception e) {
             recordRepositoryReadFailure(stopWatch.stop().totalTime().millis(), indexInfo.getFieldName(), e);
@@ -384,12 +416,12 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
     private void recordRepositoryWriteSuccess(long time_in_millis, String fieldName) {
         WRITE_SUCCESS_COUNT.increment();
         WRITE_TIME.incrementBy(time_in_millis);
-        log.debug("Repository write took {} ms for vector field [{}]", time_in_millis, fieldName);
+        log.debug("Repository write took a total of {} ms for vector field [{}]", time_in_millis, fieldName);
     }
 
     private void recordRepositoryWriteFailure(long time_in_millis, String fieldName, Exception e) {
         WRITE_FAILURE_COUNT.increment();
-        log.error("Repository write failed after {} ms for vector field [{}]", time_in_millis, fieldName, e);
+        log.debug("Repository write failed after {} ms for vector field [{}]", time_in_millis, fieldName, e);
     }
 
     // Build request phase metric helpers
@@ -418,7 +450,7 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
 
     private void recordRepositoryReadFailure(long time_in_millis, String fieldName, Exception e) {
         READ_FAILURE_COUNT.increment();
-        log.error("Repository read failed after {} ms for vector field [{}]", time_in_millis, fieldName, e);
+        log.debug("Repository read failed after {} ms for vector field [{}]", time_in_millis, fieldName, e);
     }
 
     /**
