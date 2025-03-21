@@ -111,7 +111,7 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
                     new VectorValuesInputStream(knnVectorValuesSupplier.get(), vectorDataType)
                 )
             ) {
-                log.debug("Writing {} bytes for {} docs to {}", vectorBlobLength, totalLiveDocs, blobName + VECTOR_BLOB_FILE_EXTENSION);
+                log.info("Writing {} bytes for {} docs to {}", vectorBlobLength, totalLiveDocs, blobName + VECTOR_BLOB_FILE_EXTENSION);
                 blobContainer.writeBlob(blobName + VECTOR_BLOB_FILE_EXTENSION, vectorStream, vectorBlobLength, true);
             }
             // Then write doc ids
@@ -136,7 +136,7 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         BlobContainer blobContainer
     ) throws IOException {
         try (InputStream docStream = new BufferedInputStream(new DocIdInputStream(knnVectorValues))) {
-            log.debug(
+            log.info(
                 "Writing {} bytes for {} docs ids to {}",
                 vectorBlobLength,
                 totalLiveDocs * Integer.BYTES,
