@@ -1,0 +1,26 @@
+From 9f47bc6cde1f139a20d142fd606328dcc3c284b2 Mon Sep 17 00:00:00 2001
+From: owenhalpert <ohalpert@gmail.com>
+Date: Mon, 31 Mar 2025 10:12:56 -0700
+Subject: [PATCH] Bump cmake version
+
+Signed-off-by: owenhalpert <ohalpert@gmail.com>
+---
+ similarity_search/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/similarity_search/CMakeLists.txt b/similarity_search/CMakeLists.txt
+index 98a756d..dd41df1 100644
+--- a/similarity_search/CMakeLists.txt
++++ b/similarity_search/CMakeLists.txt
+@@ -8,7 +8,7 @@
+ #
+ #
+ 
+-cmake_minimum_required (VERSION 2.8)
++cmake_minimum_required (VERSION 3.5)
+ 
+ project (NonMetricSpaceLib)
+ 
+-- 
+2.48.1
+
